@@ -1,7 +1,7 @@
-# pressure_drop.R v0.1
+# pressure_drop.R v0.2
 # Copyright 2015 Jim Hargreaves
 
-# Calculates pressure drop for a fluid flowing in a pipe.
+# Calculates pressure drop for an incompressible fluid flowing in a pipe.
 # Includes functions for calculating pump power and checking NPSHa.
 
 # This program is free software: you can redistribute it and/or modify
@@ -19,48 +19,37 @@
 
 # TODO
 # 
-# 1. Find a more authoratative source (peer reviewed) for calculating
-#    friction factor under transition flow conditions.
+# 1. Formalise output reporting. Different modes? Tables? What options exist?
 #
-# 2. Implement sense-checking function on CalcFluidVel. e.g.
-#    Warn if fluid velocity will cause water hammer.
+# 2. Way of calculating k.fit to be considered.
 
 
 # 1. Parameters & Constants
 
-# 1.1 Process Material Properties & Flowrates
-  vol.flowrate       <- 3.00     # Volumetric Flowrate (m3 hr-1)
-  fluid.dens         <- 2016.61  # Fluid density (kg m-3)
-  fluid.visc         <- 40E-3    # Fluid viscosity (Pa s)
+# 1.1 Process Material Properties
+  vol.flowrate       <- 3.000      # Volumetric Flowrate (m3 hr-1)
+  fluid.dens         <- 1900       # Fluid density (kg m-3)
+  fluid.visc         <- 40E-3      # Fluid viscosity (Pa s)
+  fluid.vapour.press <- 3169.9     # Absolute vapor pressure of fluid (Pa)
 
-
-# 1.2 Pipe Geometry & Fittings
-  # For details refer to A-26 to A-30 of Crane TP-410
+# 1.2 System Properties
 
   # 1.2.1 Pipe Geometry
-    pipe.dia         <- 0.025    # Pipe inside diameter (m)
-    pipe.roughness   <- 0.15E-3  # Mean height of roughness (m)
-    pipe.len         <- 62.616   # Pipe Length (m)
+    pipe.dia         <- 0.025      # Pipe inside diameter (m)
+    pipe.roughness   <- 0.0015E-3  # Mean height of roughness (m)
+    pipe.len         <- 62.616     # Pipe Length (m)
 
-  # 1.2.2 Quantity of Bends
-    lr.bend.qty      <- 17       # Quantity of long-radius bends
+  # 1.2.2 System Geometry & Parameters
+    suction.stat.h   <- 1.276      # Suction Static Head (m)
+    discharge.stat.h <- 3.367      # Discharge Static Head (m)
+    suction.tank.p   <- 101.315E3  # absolute pressure in suction tank (Pa)
 
-  # 1.2.3 Quantity of Valves
-    fb.gate.val.qty  <- 1        # Quantity of full-bore gate valves
-    
-    ball.val.qty     <- 1        # Quantity of ball valves
-    gate.val.qty     <- 0        # Qty of gate valves
+  # 1.2.3 Pump Parameters
+    pump.eff         <- 0.25       # Estimated efficiency of pump
 
-  # 1.2.4 Contractions & Enlargements
-    sud.enlarg.qty   <- 1        # Qty of sudden enlargements (theta <45 deg)
-    grad.enlarg.qty  <- 0        # Qty of gradual enlargements (45 <theta <180)
-    sud.cont.qty     <- 0        # Qty of sudden contractions (theta <45 deg)
-    grad.cont.qty    <- 0        # Qty of gradual contractions (45 <theta <180)
 
 # 1.3 Constants  & First Guesses
-  g                  <- 9.81     # Acceleration due to gravity
-  darcy.guess        <- 0.00500  # First Guess for Darcy Friction Factor
-
+  g                  <- 9.81       # Acceleration due to gravity (m s-2)
 
 # 2. Function Definitions
 
@@ -76,66 +65,71 @@ CalcReynoldsNum <- function(fluid.dens, fluid.vel, pipe.dia, fluid.visc) {
   # Returns:
   # reynolds - Reynolds number of the fluid in the pipe
   
+  if(!is.numeric(fluid.dens)) 
+    stop("One or more elements of fluid.dens are non-numeric.")
+  if(!is.numeric(fluid.vel))
+    stop("One or more elements of fluid.vel are non-numeric.")
+  if(!is.numeric(pipe.dia))
+    stop("One or more elements of pipe.dia are non-numeric.")
+  if(!is.numeric(fluid.visc))
+    stop("One or more elements of fluid.visc are non-numeric.")
+
   reynolds.num <- (fluid.dens * fluid.vel * pipe.dia) / fluid.visc
   return(reynolds.num)
 }
 
-CalcDarcyFactor <- function(reynolds.num, pipe.dia, pipe.roughness, darcy.guess) {
+CalcDarcyFactor<- function(reynolds.num, pipe.dia, pipe.roughness, 
+                               darcy.guess = 0.005, darcy.iterations = 50) {
   # Calculates the Darcy Friction Factor for fluid flow in a pipe
   # Uses Fd = 64 / Re for laminar flow (Re < 2320)
-  # Uses a correlation for Transitional Flow ( 2321 < Re < 4000)
-  # Uses Colbrook (solved by Newton-Rhapson) for laminar flow (Re > 4000)
+  # Uses Colbrook (solved by Newton-Rhapson) for non-laminar flow (Re > 2320)
   #
   # Args:
   # reynolds.num - The reynolds number of the fluid in a pipe
   # pipe.dia - pipe inside diameter (m)
   # pipe.roughness - mean height of pipe surface roughness (m)
-  # darcy.guess - Initial guess at Darcy Factor
+  # darcy.guess - Initial guess at Darcy Factor (optional, default = 0.005)
+  # darcy.iterations - Number of iterations. (optional, default = 50)
   # 
   # Returns:
   # darcy.factor - Darcy friction factor
 
-  if (reynolds.num <= 2320) {
-    #Laminar Flow
+  if(!is.numeric(reynolds.num)) 
+    stop("One or more elements of reynolds.num are non-numeric.")
+  if(!is.numeric(pipe.dia))
+    stop("One or more elements of pipe.dia are non-numeric.")
+  if(!is.numeric(pipe.roughness))
+    stop("One or more elements of pipe.roughness are non-numeric.")
+  if(!is.numeric(darcy.guess))
+    stop("One or more elements of darcy.guess are non-numeric.")
+  if(!is.numeric(darcy.iterations))
+    stop("One or more elements of darcy.iterations are non-numeric.")
 
-    darcy.factor <- 64 / reynolds.num
-	
-  } else if (2320 < reynolds.num & reynolds.num <= 4000) {
-      # Transitional Flow
-      # N.B. Formula in Morrison's paper originally gave Fanning, not Darcy.
-      # TODO(JH): Find a more rigorous (peer-reviewed) correlation.
-
-      darcy.factor <- {(0.0304 * ((3170 / reynolds.num)^0.165)
-        / (1 + (3170 / reynolds.num)^7.0)) + (64 / reynolds.num)}
-
-  } else {
-    if (4000 < reynolds.num)
-      #Turbulent Flow
-      
-      # Substituting some constants to simplify
-      roughness.term <- pipe.roughness / (3.7 * pipe.dia)
-      reynolds.term <- 2.51 / reynolds.num
-
-      for (i in 1:50) {
-
-        # Residual form of Colbrook
-        f <- {darcy.guess^(-0.5) + 2 *
-        log10(roughness.term + reynolds.term * darcy.guess^(-0.5))
-        }
-
-        # First Derivative of Colbrook
-        f1 <- {-0.5 * darcy.guess^(-1.5) * (1 + (2 * reynolds.term)
-        / (log(10) * (roughness.term + reynolds.term * darcy.guess^(-0.5))))
-        }
-        darcy.guess <- darcy.guess - f/f1
-      }
-     darcy.factor <- darcy.guess 
+  laminar.darcy <- 64 / reynolds.num
   
+  roughness.term <- pipe.roughness / (3.7 * pipe.dia)
+  
+  reynolds.term <- 2.51 / reynolds.num
+
+  for (i in 1:darcy.iterations) {
+    # Residual form of Colbrook
+    f <- {darcy.guess^(-0.5) + 2 *
+    log10(roughness.term + reynolds.term * darcy.guess^(-0.5))
+    }
+    # First Derivative of Colbrook
+    f1 <- {-0.5 * darcy.guess^(-1.5) * (1 + (2 * reynolds.term)
+    / (log(10) * (roughness.term + reynolds.term * darcy.guess^(-0.5))))
+    }
+    darcy.guess <- darcy.guess - f/f1
   }
+  turbulent.darcy <- darcy.guess
+
+  darcy.factor <- ifelse(reynolds.num < 2320, laminar.darcy, turbulent.darcy)
+  
   return(darcy.factor)
 }
 
-CalcFluidVelocity <- function(vol.flowrate, pipe.dia) {
+CalcFluidVel <- function(vol.flowrate, pipe.dia) {
   # Given pipe diameter and flowrate, calculates fluid velocity
   #
   # Args:
@@ -145,11 +139,16 @@ CalcFluidVelocity <- function(vol.flowrate, pipe.dia) {
   # Returns:
   # fluid.vel - Linear velocity of the fluid (m s-1)
 
+  if(!is.numeric(vol.flowrate)) 
+    stop("One or more elements of vol.flowrate are non-numeric.")
+  if(!is.numeric(pipe.dia))
+    stop("One or more elements of pipe.dia are non-numeric.")
+
   fluid.vel <- vol.flowrate / (pi * (pipe.dia / 2) ^ 2 * 3600)
   return(fluid.vel)
 }
 
-CalcFricH <- function(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fit) {
+CalcFricH <- function(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fits) {
   # Calculates the frictional losses for a fluid flowing in a length of pipe
   #
   # Args:
@@ -162,73 +161,136 @@ CalcFricH <- function(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fit) {
   # Returns:
   # fric.h
 
+  if(!is.numeric(fluid.vel))
+    stop("One or more elements of fluid.vel are non-numeric.")
+  if(!is.numeric(darcy.factor))
+    stop("One or more elements of darcy.factor are non-numeric.")
+  if(!is.numeric(pipe.len))
+    stop("One or more elements of pipe.len are non-numeric.")
+  if(!is.numeric(pipe.dia))
+    stop("One or more elements of pipe.dia are non-numeric.")
+  if(!is.numeric(k.fits))
+    stop("One or more elements of k.fits are non-numeric.")
+
   fric.h <- {(fluid.vel^2 / (2 * g)) * 
   (darcy.factor * (pipe.len / pipe.dia) + k.fits)
   }
   return(fric.h)
 }
 
-#CalcFittingK <- function(fitting.type, d1, d2, theta) {
-  # Calculates the k factor of a fitting as per Crane TP-410
-  #
+ConvertH2P <- function(head, fluid.dens) {
+  # Converts fluid heads (m) to equivalent pressures (Pa)
+  # 
   # Args:
-  # fitting.type - Type of fitting
-  # d1 - Smallest Diameter (m)
-  # d2 - Largest Diameter (m)
-  # theta - critical angle (degrees)
+  # head - fluid head (m)
+  # fluid.dens - density of fluid (kg m-3)
   #
   # Returns:
-  # k.fit - Calculated K factor
+  # pressure - pressure equivalent to head (Pa)
 
-#  beta <- (d1/d2)
-#  crane.f1 <- (0.8 * sin(theta / 2) * (1 - beta^2)) / beta^4
-#  crane.f2 <- {}
-#  crane.f3 <- {}
-#  crane.f4 <- {}
-#  crane.f5 <- {}
-#  crane.f6 <- {}
-#  crane.f7 <- {}
+  if(!is.numeric(head)) 
+    stop("One or more elements of head are non-numeric.")
+  if(!is.numeric(fluid.dens))
+    stop("One or more elements of fluid.dens are non-numeric.")
 
-#}
+  pressure <- head * fluid.dens * g
+  return(pressure)
+}
 
+ConvertP2H <- function(pressure, fluid.dens) {
+  # Converts pressures (Pa) to equivalent fluid heads (m)
+  # 
+  # Args:
+  # pressure - pressure equivalent to head (Pa)
+  # fluid.dens - density of fluid (kg m-3)
+  #
+  # Returns:
+  # head - fluid head (m)
+  if(!is.numeric(pressure)) 
+    stop("One or more elements of pressure are non-numeric.")
+  if(!is.numeric(fluid.dens))
+    stop("One or more elements of fluid.dens are non-numeric.")
 
+  head <- pressure / (fluid.dens * g)
+  return(head)
+}
 
-
- 
-
-
-CalcPumpPower <- function(Q, fluid.dens, h, efficiency) {
+CalcPumpPower <- function(vol.flowrate, fluid.dens, total.diff.h, efficiency) {
   # Calculates the power requirement of a centrifugal liquid pump
   #
   # Args:
-  # Q - Flowrate (Units?)
+  # vol.flowrate - Flowrate (m3 h-1)
   # fluid density - density of fluid
-  # h - total differential head
-  # efficiency of the pump
+  # total.diff.h - total differential head
+  # pump.eff - efficiency of the pump
   #
   # Returns:
   # abs.power - The estimated absorbed power of the pump.
-  
-  hyd.power <- (Q * fluid.dens * g * h) / 3.6E6
-  abs.power <- hyd.power / efficiency
+  if(!is.numeric(vol.flowrate)) 
+    stop("One or more elements of vol.flowrate are non-numeric.")
+  if(!is.numeric(fluid.dens))
+    stop("One or more elements of fluid.dens are non-numeric.")
+  if(!is.numeric(total.diff.h)) 
+    stop("One or more elements of total.diff.h are non-numeric.")
+  if(!is.numeric(efficiency))
+    stop("One or more elements of efficiency are non-numeric.")
+ 
+  hyd.power <- (vol.flowrate * fluid.dens * g * total.diff.h) / 3.6E6
+  abs.power <- hyd.power / pump.eff
   return(abs.power)
 }
 
 
 # 3. Executed Statements
+# (Customise to suit application)
 
-fluid.vel <- CalcFluidVelocity(vol.flowrate, pipe.dia)
+fluid.vel <- CalcFluidVel(vol.flowrate, pipe.dia)
 
 reynolds.num <- CalcReynoldsNum(fluid.dens, fluid.vel, pipe.dia, fluid.visc)
 
-darcy.factor <- CalcDarcyFactor(reynolds.num, pipe.roughness, darcy.guess)
+darcy.factor <- seq(1, length(reynolds.num), 1) 
+darcy.factor <- CalcDarcyFactor(reynolds.num, pipe.dia, pipe.roughness)
 
-#fric.h <- CalcFricH(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fits)
+k.fits <- 584 * darcy.factor + 2.434
+# Determined Manually using Crane TP-410
 
-print(fluid.vel)
-print(reynolds.num)
-print(darcy.factor)
+discharge.fric.h <- CalcFricH(fluid.vel, darcy.factor, pipe.len, pipe.dia, 
+                              k.fits)
+discharge.fric.p <- ConvertH2P(discharge.fric.h, fluid.dens)
 
+suction.fric.h <- 0
+suction.fric.p <- 0
+# Suction frictional losses assumed zero (short run)
+
+total.diff.h <- (discharge.stat.h - suction.stat.h + discharge.fric.h + 
+                 suction.fric.h)
+total.diff.p <- ConvertH2P(total.diff.h, fluid.dens)
+
+
+abs.power <- CalcPumpPower(vol.flowrate, fluid.dens, total.diff.h, pump.eff)
+
+npsha <- (suction.tank.p + ConvertH2P(suction.stat.h, fluid.dens) - 
+          suction.fric.p - fluid.vapour.press)
+
+results <- data.frame(vol.flowrate, fluid.dens, fluid.visc, pipe.dia, pipe.len,
+                      suction.stat.h, discharge.stat.h, suction.tank.p, 
+                      pump.eff, fluid.vel, reynolds.num, darcy.factor,
+                      discharge.fric.h, total.diff.h, abs.power, npsha) 
+
+results.summary <- data.frame(signif(fluid.vel, 4), round(reynolds.num, 0), 
+                      signif(darcy.factor, 3), round(discharge.fric.h, 3),
+                      round(total.diff.h, 3), round(abs.power, 2), 
+                      round(ConvertP2H(npsha, fluid.dens),3 ))
+colnames(results.summary) <- c(
+                       "Fluid Velocity (m s-1)",
+                       "Reynolds No.",
+                       "Darcy Friction Factor",
+                       "discharge friction head (m)",
+                       "total differential head (m)",
+                       "absorbed power (kW)",
+                       "NPSHa (m)")
+
+print(results.summary)
 
 #  Appendix 1 - References
 
