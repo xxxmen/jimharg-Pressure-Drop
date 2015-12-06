@@ -1,4 +1,5 @@
 # pressure_drop.R v0.2
+# Part of the Pressure Drop Calculator Program
 # Copyright 2015 Jim Hargreaves
 
 # Calculates pressure drop for an incompressible fluid flowing in a pipe.
@@ -22,25 +23,26 @@
 # 1. Formalise output reporting. Different modes? Tables? What options exist?
 #
 # 2. Way of calculating k.fit to be considered.
+#
+# 3. Use RShiny to make a nice web-based GUI for the program.
+#
+# 4. Create a database of common pipe materials and their roughness values
 
 
 # 1. Parameters & Constants
 
 # 1.1 Process Material Properties
-  vol.flowrate       <- 3.000      # Volumetric Flowrate (m3 hr-1)
-  fluid.dens         <- 1900       # Fluid density (kg m-3)
-  fluid.visc         <- 40E-3      # Fluid viscosity (Pa s)
-  fluid.vapour.press <- 3169.9     # Absolute vapor pressure of fluid (Pa)
+  vol.flowrate       <- 180.0      # Volumetric Flowrate (m3 hr-1)
+  fluid.dens         <- 997.01     # Fluid density (kg m-3)
+  fluid.visc         <- 9.7747E-4  # Fluid viscosity (Pa s)
+  fluid.vapour.press <- 2338.8     # Absolute vapor pressure of fluid (Pa)
 
 # 1.2 System Properties
 
-  # 1.2.1 Pipe Geometry
-    pipe.dia         <- 0.025      # Pipe inside diameter (m)
-    pipe.roughness   <- 0.0015E-3  # Mean height of roughness (m)
-    pipe.len         <- 62.616     # Pipe Length (m)
+  
 
   # 1.2.2 System Geometry & Parameters
-    suction.stat.h   <- 1.276      # Suction Static Head (m)
+    suction.stat.h   <- 0.410      # Suction Static Head (m)
     discharge.stat.h <- 3.367      # Discharge Static Head (m)
     suction.tank.p   <- 101.315E3  # absolute pressure in suction tank (Pa)
 
@@ -65,15 +67,6 @@ CalcReynoldsNum <- function(fluid.dens, fluid.vel, pipe.dia, fluid.visc) {
   # Returns:
   # reynolds - Reynolds number of the fluid in the pipe
   
-  if(!is.numeric(fluid.dens)) 
-    stop("One or more elements of fluid.dens are non-numeric.")
-  if(!is.numeric(fluid.vel))
-    stop("One or more elements of fluid.vel are non-numeric.")
-  if(!is.numeric(pipe.dia))
-    stop("One or more elements of pipe.dia are non-numeric.")
-  if(!is.numeric(fluid.visc))
-    stop("One or more elements of fluid.visc are non-numeric.")
-
   reynolds.num <- (fluid.dens * fluid.vel * pipe.dia) / fluid.visc
   return(reynolds.num)
 }
@@ -93,17 +86,6 @@ CalcDarcyFactor<- function(reynolds.num, pipe.dia, pipe.roughness,
   # 
   # Returns:
   # darcy.factor - Darcy friction factor
-
-  if(!is.numeric(reynolds.num)) 
-    stop("One or more elements of reynolds.num are non-numeric.")
-  if(!is.numeric(pipe.dia))
-    stop("One or more elements of pipe.dia are non-numeric.")
-  if(!is.numeric(pipe.roughness))
-    stop("One or more elements of pipe.roughness are non-numeric.")
-  if(!is.numeric(darcy.guess))
-    stop("One or more elements of darcy.guess are non-numeric.")
-  if(!is.numeric(darcy.iterations))
-    stop("One or more elements of darcy.iterations are non-numeric.")
 
   laminar.darcy <- 64 / reynolds.num
   
@@ -139,11 +121,6 @@ CalcFluidVel <- function(vol.flowrate, pipe.dia) {
   # Returns:
   # fluid.vel - Linear velocity of the fluid (m s-1)
 
-  if(!is.numeric(vol.flowrate)) 
-    stop("One or more elements of vol.flowrate are non-numeric.")
-  if(!is.numeric(pipe.dia))
-    stop("One or more elements of pipe.dia are non-numeric.")
-
   fluid.vel <- vol.flowrate / (pi * (pipe.dia / 2) ^ 2 * 3600)
   return(fluid.vel)
 }
@@ -159,18 +136,45 @@ CalcFricH <- function(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fits) {
   # k.fit - Sum of fitting Resistance cefficients 
   #
   # Returns:
+  # fric.h - frictional losses in head (m)
+
+  fric.h <- {(fluid.vel^2 / (2 * g)) * 
+  (darcy.factor * (pipe.len / pipe.dia) + k.fits)
+  }
+  return(fric.h)
+}
+
+CalcLineH <- function(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fits) {
+  # Calculates the frictional losses for a fluid flowing in a length of pipe
+  #
+  # Args:
+  # fluid.vel - linear velocity of the fluid (m s-1)
+  # darcy.factor - darcy friction factor
+  # pipe.len - Pipe length (m)
+  # pipe.dia - inside diameter of pipe (m)
+  # k.fit - Sum of fitting Resistance cefficients 
+  #
+  # Returns:
   # fric.h
 
-  if(!is.numeric(fluid.vel))
-    stop("One or more elements of fluid.vel are non-numeric.")
-  if(!is.numeric(darcy.factor))
-    stop("One or more elements of darcy.factor are non-numeric.")
-  if(!is.numeric(pipe.len))
-    stop("One or more elements of pipe.len are non-numeric.")
-  if(!is.numeric(pipe.dia))
-    stop("One or more elements of pipe.dia are non-numeric.")
-  if(!is.numeric(k.fits))
-    stop("One or more elements of k.fits are non-numeric.")
+  fric.h <- {(fluid.vel^2 / (2 * g)) * 
+  (darcy.factor * (pipe.len / pipe.dia) + k.fits)
+  }
+  return(fric.h)
+}
+
+CalcFitH <- function(fluid.vel, darcy.factor, pipe.len, pipe.dia, k.fits) {
+  # Calculates the frictional losses for a fluid flowing through fittings
+  #
+  # Args:
+  # fluid.vel - linear velocity of the fluid (m s-1)
+  # darcy.factor - darcy friction factor
+  # pipe.len - Pipe length (m)
+  # pipe.dia - inside diameter of pipe (m)
+  # k.fit - Sum of fitting Resistance cefficients 
+  #
+  # Returns:
+  # fric.h
 
   fric.h <- {(fluid.vel^2 / (2 * g)) * 
   (darcy.factor * (pipe.len / pipe.dia) + k.fits)
@@ -188,11 +192,6 @@ ConvertH2P <- function(head, fluid.dens) {
   # Returns:
   # pressure - pressure equivalent to head (Pa)
 
-  if(!is.numeric(head)) 
-    stop("One or more elements of head are non-numeric.")
-  if(!is.numeric(fluid.dens))
-    stop("One or more elements of fluid.dens are non-numeric.")
-
   pressure <- head * fluid.dens * g
   return(pressure)
 }
@@ -206,10 +205,6 @@ ConvertP2H <- function(pressure, fluid.dens) {
   #
   # Returns:
   # head - fluid head (m)
-  if(!is.numeric(pressure)) 
-    stop("One or more elements of pressure are non-numeric.")
-  if(!is.numeric(fluid.dens))
-    stop("One or more elements of fluid.dens are non-numeric.")
 
   head <- pressure / (fluid.dens * g)
   return(head)
@@ -226,23 +221,21 @@ CalcPumpPower <- function(vol.flowrate, fluid.dens, total.diff.h, efficiency) {
   #
   # Returns:
   # abs.power - The estimated absorbed power of the pump.
-  if(!is.numeric(vol.flowrate)) 
-    stop("One or more elements of vol.flowrate are non-numeric.")
-  if(!is.numeric(fluid.dens))
-    stop("One or more elements of fluid.dens are non-numeric.")
-  if(!is.numeric(total.diff.h)) 
-    stop("One or more elements of total.diff.h are non-numeric.")
-  if(!is.numeric(efficiency))
-    stop("One or more elements of efficiency are non-numeric.")
  
   hyd.power <- (vol.flowrate * fluid.dens * g * total.diff.h) / 3.6E6
-  abs.power <- hyd.power / pump.eff
+  abs.power <- hyd.power / efficiency
   return(abs.power)
 }
 
 
 # 3. Executed Statements
 # (Customise to suit application)
+
+# 1.2.1 Pipe Geometry
+    pipe.dia         <- c(0.1, 0.200, 0.200)      # Pipe inside diameter (m)
+    pipe.roughness   <- 0.046E-3   # Mean height of roughness (m)
+    pipe.len         <- c(1, 62.616, 4)     # Pipe Length (m)
+
 
 fluid.vel <- CalcFluidVel(vol.flowrate, pipe.dia)
 
