@@ -1,4 +1,4 @@
-# pressure_drop.R v0.2
+# pressure_drop.R 
 # Part of the Pressure Drop Calculator Program
 # Copyright 2015 Jim Hargreaves
 
@@ -32,25 +32,25 @@
 # 1. Parameters & Constants
 
 # 1.1 Process Material Properties
-  vol.flowrate       <- 180.0      # Volumetric Flowrate (m3 hr-1)
-  fluid.dens         <- 997.01     # Fluid density (kg m-3)
-  fluid.visc         <- 9.7747E-4  # Fluid viscosity (Pa s)
-  fluid.vapour.press <- 2338.8     # Absolute vapor pressure of fluid (Pa)
+  vol.flowrate       <-       # Volumetric Flowrate (m3 hr-1)
+  fluid.dens         <-      # Fluid density (kg m-3)
+  fluid.visc         <-   # Fluid viscosity (Pa s)
+  fluid.vapour.press <-      # Absolute vapor pressure of fluid (Pa)
 
 # 1.2 System Properties
 
   # 1.2.1 Pipe Geometry
-    pipe.dia         <- c(0.1, 0.200, 0.200)      # Pipe inside diameter (m)
-    pipe.roughness   <- 0.046E-3   # Mean height of roughness (m)
-    pipe.len         <- c(1, 62.616, 4)     # Pipe Length (m)
+    pipe.dia         <-       # Pipe inside diameter (m)
+    pipe.roughness   <-    # Mean height of roughness (m)
+    pipe.len         <-      # Pipe Length (m)
 
   # 1.2.2 System Geometry & Parameters
-    suction.stat.h   <- 0.410      # Suction Static Head (m)
-    discharge.stat.h <- 3.367      # Discharge Static Head (m)
-    suction.tank.p   <- 101.315E3  # absolute pressure in suction tank (Pa)
+    suction.stat.h   <-       # Suction Static Head (m)
+    discharge.stat.h <-       # Discharge Static Head (m)
+    suction.tank.p   <-   # absolute pressure in suction tank (Pa)
 
   # 1.2.3 Pump Parameters
-    pump.eff         <- 0.25       # Estimated efficiency of pump
+    pump.eff         <-        # Estimated efficiency of pump
 
 
 # 1.3 Constants  & First Guesses
@@ -230,107 +230,6 @@ CalcPumpPower <- function(vol.flowrate, fluid.dens, total.diff.h, efficiency) {
 
 # 3. Executed Statements
 # (Customise to suit application)
-
-# Read line components CSV file
-line.components <- {
-  read.csv(file="C:\\Users\\brg88279\\Documents\\source\\demin_line.csv")}
-
-# Calculate pressure drop for each component
-pipe.dia <- line.components[,2]/ 1000
-pipe.len <- {
-  suppressWarnings(as.numeric(as.character(line.components[,3]))/1000)}
-pipe.len <- ifelse(is.na(pipe.len), 0, pipe.len)
-
-fluid.vel <- CalcFluidVel(vol.flowrate, pipe.dia)
-reynolds.num <- CalcReynoldsNum(fluid.dens, fluid.vel, pipe.dia, fluid.visc)
-darcy.factor <- CalcDarcyFactor(reynolds.num, pipe.dia, pipe.roughness)
-
-
-press.drop.len <- CalcLenH(fluid.vel, darcy.factor, pipe.len, pipe.dia)
-stop()
-
-for (i in 1:nrow(line.components)) {
-
-  # if type is LEN...
-  if (line.components[i,1] == "LEN") {
-    pipe.len <- as.numeric(as.character(line.components[i,3]))/1000
-    press.drop.h[i] <- CalcLenH(fluid.vel, darcy.factor, pipe.len, pipe.dia)	
-    print(press.drop.h)
-  }	
-  # if type is BAL...
-  if (line.components[i,1] == "BAL") {
-    press.drop.h[i] <- 0  
-    print("BAL")
-  }
-  
-  # if type is LRB...
-  if (line.components[i,1] == "LRB") {
-    press.drop.h[i] <- 0
-    print("LRB")
-  }
-
-  # if type is TTB...
-  if (line.components[i,1] == "TTB") {
-    press.drop.h[i] <- 0
-    print("TTB")
-  }
-        
-  # if type is RED...
-  if (line.components[i,1] == "RED") {
-    press.drop.h[i] <- 0
-    print("RED")
-  }
-}
-
-stop()
-
-fluid.vel <- CalcFluidVel(vol.flowrate, pipe.dia)
-
-reynolds.num <- CalcReynoldsNum(fluid.dens, fluid.vel, pipe.dia, fluid.visc)
-
-darcy.factor <- seq(1, length(reynolds.num), 1) 
-darcy.factor <- CalcDarcyFactor(reynolds.num, pipe.dia, pipe.roughness)
-
-k.fits <- 584 * darcy.factor + 2.434
-# Determined Manually using Crane TP-410
-
-discharge.fric.h <- CalcFricH(fluid.vel, darcy.factor, pipe.len, pipe.dia, 
-                              k.fits)
-discharge.fric.p <- ConvertH2P(discharge.fric.h, fluid.dens)
-
-suction.fric.h <- 0
-suction.fric.p <- 0
-# Suction frictional losses assumed zero (short run)
-
-total.diff.h <- (discharge.stat.h - suction.stat.h + discharge.fric.h + 
-                 suction.fric.h)
-total.diff.p <- ConvertH2P(total.diff.h, fluid.dens)
-
-
-abs.power <- CalcPumpPower(vol.flowrate, fluid.dens, total.diff.h, pump.eff)
-
-npsha <- (suction.tank.p + ConvertH2P(suction.stat.h, fluid.dens) - 
-          suction.fric.p - fluid.vapour.press)
-
-results <- data.frame(vol.flowrate, fluid.dens, fluid.visc, pipe.dia, pipe.len,
-                      suction.stat.h, discharge.stat.h, suction.tank.p, 
-                      pump.eff, fluid.vel, reynolds.num, darcy.factor,
-                      discharge.fric.h, total.diff.h, abs.power, npsha) 
-
-results.summary <- data.frame(signif(fluid.vel, 4), round(reynolds.num, 0), 
-                      signif(darcy.factor, 3), round(discharge.fric.h, 3),
-                      round(total.diff.h, 3), round(abs.power, 2), 
-                      round(ConvertP2H(npsha, fluid.dens),3 ))
-colnames(results.summary) <- c(
-                       "Fluid Velocity (m s-1)",
-                       "Reynolds No.",
-                       "Darcy Friction Factor",
-                       "discharge friction head (m)",
-                       "total differential head (m)",
-                       "absorbed power (kW)",
-                       "NPSHa (m)")
-
-print(results.summary)
 
 #  Appendix 1 - References
 
